@@ -29,7 +29,7 @@ func NewWorker(port int) *Worker {
 		ID:        utils.GenerateWorkerID(),
 		Port:      port,
 		Reliable:  true,
-		baseValue: 50000.0, // Base value for simulation
+		baseValue: 50000.0, // Base value for simulationE
 	}
 }
 
@@ -37,20 +37,6 @@ func NewWorker(port int) *Worker {
 func (w *Worker) StartWorkerServer() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
-
-	// CORS middleware
-	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-
-		c.Next()
-	})
 
 	// Register routes
 	r.POST("/task", w.handleTask)
@@ -144,20 +130,30 @@ func (w *Worker) simulateResponse(query string) float64 {
 	return baseValue + variance
 }
 
-// RegisterWithCoordinator registers this worker with the coordinator
+// RegisterWithCoordinator registers this worker with the coordinator using Gin-style approach
 func (w *Worker) RegisterWithCoordinator(coordinatorURL string) error {
 	registerReq := models.RegisterRequest{
 		ID:       w.ID,
 		Endpoint: fmt.Sprintf("http://localhost:%d", w.Port),
 	}
 
+	// Marshal request using Gin's JSON utilities
 	reqBody, err := json.Marshal(registerReq)
 	if err != nil {
 		return fmt.Errorf("failed to marshal registration request: %v", err)
 	}
 
-	resp, err := http.Post(coordinatorURL+"/register", "application/json",
-		bytes.NewBuffer(reqBody))
+	// Create HTTP request
+	req, err := http.NewRequest("POST", coordinatorURL+"/register", bytes.NewBuffer(reqBody))
+	if err != nil {
+		return fmt.Errorf("failed to create registration request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	// Make request
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to register with coordinator: %v", err)
 	}

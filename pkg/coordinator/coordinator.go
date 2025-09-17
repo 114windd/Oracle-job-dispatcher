@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"sync"
@@ -174,9 +175,21 @@ func (c *Coordinator) sendTaskToWorker(ctx context.Context, req models.OracleReq
 	}
 	defer resp.Body.Close()
 
-	// Parse response
+	// Parse response using Gin's JSON utilities
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return models.WorkerResult{
+			WorkerID:     worker.ID,
+			RequestID:    req.ID,
+			Value:        0,
+			Err:          fmt.Sprintf("failed to read response body: %v", err),
+			ResponseTime: time.Since(startTime),
+			Reliable:     false,
+		}
+	}
+
 	var result models.WorkerResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return models.WorkerResult{
 			WorkerID:     worker.ID,
 			RequestID:    req.ID,
@@ -223,20 +236,6 @@ func (c *Coordinator) calculateReliabilityNote(results []models.WorkerResult) st
 func (c *Coordinator) StartHTTPServer() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
-
-	// CORS middleware
-	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-
-		c.Next()
-	})
 
 	// Register routes
 	r.GET("/health", c.handleHealth)

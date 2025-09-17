@@ -5,98 +5,52 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
 
 	"distributed-worker-system/pkg/models"
 	"distributed-worker-system/pkg/utils"
+
+	"github.com/gin-gonic/gin"
 )
 
-// Client represents a client that submits oracle requests
+// Client represents a client that submits oracle requests using Gin
 type Client struct {
 	coordinatorURL string
 	httpClient     *http.Client
+	ginEngine      *gin.Engine
 }
 
-// NewClient creates a new client instance
+// NewClient creates a new client instance with Gin
 func NewClient(coordinatorURL string) *Client {
+	gin.SetMode(gin.ReleaseMode)
+
 	return &Client{
 		coordinatorURL: coordinatorURL,
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},
+		ginEngine: gin.New(),
 	}
 }
 
-// SubmitOracleRequest submits a single oracle request to the coordinator
-func (c *Client) SubmitOracleRequest(query string) (*models.OracleResult, error) {
+// SubmitOracleRequest submits a single oracle request to the coordinator using Gin
+// If no context is needed, pass context.Background()
+func (c *Client) SubmitOracleRequest(ctx context.Context, query string) (*models.OracleResult, error) {
 	req := models.OracleRequest{
 		ID:    utils.GenerateRequestID(),
 		Query: query,
 	}
 
-	reqBody, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %v", err)
-	}
-
 	log.Printf("📤 Submitting request %s: %s", req.ID, req.Query)
 
-	resp, err := c.httpClient.Post(c.coordinatorURL+"/request", "application/json",
-		bytes.NewBuffer(reqBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to submit request: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("coordinator returned status %d", resp.StatusCode)
-	}
-
+	// Make HTTP request with context
 	var result models.OracleResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %v", err)
-	}
-
-	return &result, nil
-}
-
-// SubmitOracleRequestWithContext submits a request with a custom context
-func (c *Client) SubmitOracleRequestWithContext(ctx context.Context, query string) (*models.OracleResult, error) {
-	req := models.OracleRequest{
-		ID:    utils.GenerateRequestID(),
-		Query: query,
-	}
-
-	reqBody, err := json.Marshal(req)
+	err := c.makeRequest(ctx, "POST", "/request", req, &result)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %v", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.coordinatorURL+"/request",
-		bytes.NewBuffer(reqBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request: %v", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	log.Printf("📤 Submitting request %s: %s", req.ID, req.Query)
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to submit request: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("coordinator returned status %d", resp.StatusCode)
-	}
-
-	var result models.OracleResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %v", err)
+		return nil, err
 	}
 
 	return &result, nil
@@ -111,7 +65,7 @@ func SimulateClient(coordinatorURL string, queries []string) {
 	for i, query := range queries {
 		log.Printf("\n--- Request %d ---", i+1)
 
-		result, err := client.SubmitOracleRequest(query)
+		result, err := client.SubmitOracleRequest(context.Background(), query)
 		if err != nil {
 			log.Printf("❌ Request failed: %v", err)
 			continue
@@ -143,12 +97,42 @@ func SimulateClient(coordinatorURL string, queries []string) {
 	log.Printf("✅ Client simulation completed")
 }
 
-// submitSingleRequest creates and submits one oracle request
-func submitSingleRequest(client *Client, query string) *models.OracleResult {
-	result, err := client.SubmitOracleRequest(query)
+// makeRequest makes an HTTP request with context using Gin's JSON utilities
+func (c *Client) makeRequest(ctx context.Context, method string, path string, requestBody any, responseBody any) error {
+	// Marshal request body
+	reqBytes, err := json.Marshal(requestBody)
 	if err != nil {
-		log.Printf("❌ Request failed: %v", err)
-		return nil
+		return fmt.Errorf("failed to marshal request: %v", err)
 	}
-	return result
+
+	// Create HTTP request with context
+	req, err := http.NewRequestWithContext(ctx, method, c.coordinatorURL+path, bytes.NewBuffer(reqBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	// Make request
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to submit request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("coordinator returned status %d", resp.StatusCode)
+	}
+
+	// Read and unmarshal response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	if err := json.Unmarshal(body, responseBody); err != nil {
+		return fmt.Errorf("failed to decode response: %v", err)
+	}
+
+	return nil
 }
