@@ -12,32 +12,25 @@ import (
 
 	"distributed-worker-system/pkg/models"
 	"distributed-worker-system/pkg/utils"
-
-	"github.com/gin-gonic/gin"
 )
 
-// Client represents a client that submits oracle requests using Gin
+// Client represents a client that submits oracle requests
 type Client struct {
 	coordinatorURL string
 	httpClient     *http.Client
-	ginEngine      *gin.Engine
 }
 
-// NewClient creates a new client instance with Gin
+// NewClient creates a new client instance
 func NewClient(coordinatorURL string) *Client {
-	gin.SetMode(gin.ReleaseMode)
-
 	return &Client{
 		coordinatorURL: coordinatorURL,
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},
-		ginEngine: gin.New(),
 	}
 }
 
-// SubmitOracleRequest submits a single oracle request to the coordinator using Gin
-// If no context is needed, pass context.Background()
+// SubmitOracleRequest submits a single oracle request to the coordinator
 func (c *Client) SubmitOracleRequest(ctx context.Context, query string) (*models.OracleResult, error) {
 	req := models.OracleRequest{
 		ID:    utils.GenerateRequestID(),
@@ -97,7 +90,7 @@ func SimulateClient(coordinatorURL string, queries []string) {
 	log.Printf("✅ Client simulation completed")
 }
 
-// makeRequest makes an HTTP request with context using Gin's JSON utilities
+// makeRequest makes an HTTP request with context
 func (c *Client) makeRequest(ctx context.Context, method string, path string, requestBody any, responseBody any) error {
 	// Marshal request body
 	reqBytes, err := json.Marshal(requestBody)

@@ -22,7 +22,6 @@ type Coordinator struct {
 	workers    map[string]models.WorkerInfo
 	workersMux sync.RWMutex
 	httpClient *http.Client
-	aggregator string
 	port       int
 }
 
@@ -33,8 +32,7 @@ func NewCoordinator(port int) *Coordinator {
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
-		aggregator: "average", // default strategy
-		port:       port,
+		port: port,
 	}
 }
 
@@ -57,8 +55,8 @@ func (c *Coordinator) SubmitRequest(ctx context.Context, req models.OracleReques
 	// Dispatch to all available workers
 	workerResults := c.dispatchToWorkers(ctx, req)
 
-	// Aggregate results
-	finalValue := AggregateResults(workerResults, c.aggregator)
+	// Aggregate results using average
+	finalValue := AggregateResults(workerResults, "average")
 
 	// Calculate reliability note
 	reliabilityNote := c.calculateReliabilityNote(workerResults)
@@ -142,7 +140,7 @@ func (c *Coordinator) sendTaskToWorker(ctx context.Context, req models.OracleReq
 			Value:        0,
 			Err:          fmt.Sprintf("failed to marshal request: %v", err),
 			ResponseTime: time.Since(startTime),
-			Reliable:     false,
+			Reliable:     true,
 		}
 	}
 
@@ -155,7 +153,7 @@ func (c *Coordinator) sendTaskToWorker(ctx context.Context, req models.OracleReq
 			Value:        0,
 			Err:          fmt.Sprintf("failed to create HTTP request: %v", err),
 			ResponseTime: time.Since(startTime),
-			Reliable:     false,
+			Reliable:     true,
 		}
 	}
 
@@ -170,7 +168,7 @@ func (c *Coordinator) sendTaskToWorker(ctx context.Context, req models.OracleReq
 			Value:        0,
 			Err:          fmt.Sprintf("HTTP request failed: %v", err),
 			ResponseTime: time.Since(startTime),
-			Reliable:     false,
+			Reliable:     true,
 		}
 	}
 	defer resp.Body.Close()
@@ -184,7 +182,7 @@ func (c *Coordinator) sendTaskToWorker(ctx context.Context, req models.OracleReq
 			Value:        0,
 			Err:          fmt.Sprintf("failed to read response body: %v", err),
 			ResponseTime: time.Since(startTime),
-			Reliable:     false,
+			Reliable:     true,
 		}
 	}
 
@@ -196,7 +194,7 @@ func (c *Coordinator) sendTaskToWorker(ctx context.Context, req models.OracleReq
 			Value:        0,
 			Err:          fmt.Sprintf("failed to decode response: %v", err),
 			ResponseTime: time.Since(startTime),
-			Reliable:     false,
+			Reliable:     true,
 		}
 	}
 
@@ -260,7 +258,6 @@ func (c *Coordinator) handleRegister(ctx *gin.Context) {
 		ID:       req.ID,
 		Endpoint: req.Endpoint,
 		LastSeen: time.Now(),
-		Reliable: true,
 	}
 
 	if err := c.RegisterWorker(workerInfo); err != nil {

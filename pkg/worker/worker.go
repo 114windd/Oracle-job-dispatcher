@@ -17,19 +17,15 @@ import (
 
 // Worker represents a worker that processes oracle tasks
 type Worker struct {
-	ID        string
-	Port      int
-	Reliable  bool
-	baseValue float64
+	ID   string
+	Port int
 }
 
 // NewWorker creates a new worker instance
 func NewWorker(port int) *Worker {
 	return &Worker{
-		ID:        utils.GenerateWorkerID(),
-		Port:      port,
-		Reliable:  true,
-		baseValue: 50000.0, // Base value for simulationE
+		ID:   utils.GenerateWorkerID(),
+		Port: port,
 	}
 }
 
@@ -69,7 +65,6 @@ func (w *Worker) handleHealth(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{
 		"status":    "healthy",
 		"worker_id": w.ID,
-		"reliable":  w.Reliable,
 	})
 }
 
@@ -89,7 +84,7 @@ func (w *Worker) processTask(req models.OracleRequest) models.WorkerResult {
 			Value:        0,
 			Err:          "simulated worker failure",
 			ResponseTime: time.Since(startTime),
-			Reliable:     w.Reliable,
+			Reliable:     true,
 		}
 	}
 
@@ -102,16 +97,14 @@ func (w *Worker) processTask(req models.OracleRequest) models.WorkerResult {
 		Value:        value,
 		Err:          "",
 		ResponseTime: time.Since(startTime),
-		Reliable:     w.Reliable,
+		Reliable:     true,
 	}
 }
 
 // simulateResponse generates a random value with variance based on query
 func (w *Worker) simulateResponse(query string) float64 {
 	// Base value varies by query type
-	baseValue := w.baseValue
-
-	// Adjust base value based on query
+	var baseValue float64
 	switch query {
 	case "BTC/USD":
 		baseValue = 42000.0
@@ -165,11 +158,6 @@ func (w *Worker) RegisterWithCoordinator(coordinatorURL string) error {
 
 	log.Printf("✅ Worker %s registered with coordinator at %s", w.ID, coordinatorURL)
 	return nil
-}
-
-// SetReliability sets the worker's reliability status
-func (w *Worker) SetReliability(reliable bool) {
-	w.Reliable = reliable
 }
 
 // GetID returns the worker's ID

@@ -31,7 +31,6 @@ type WorkerInfo struct {
 	ID       string    `json:"id"`
 	Endpoint string    `json:"endpoint"`
 	LastSeen time.Time `json:"last_seen"`
-	Reliable bool      `json:"reliable"`
 }
 
 // RegisterRequest represents a worker registration request
