@@ -185,16 +185,38 @@ func (c *Coordinator) calculateReliabilityNote(results []models.WorkerResult) st
 	}
 }
 
-// StartHTTPServer starts the coordinator HTTP server
+// StartHTTPServer starts the coordinator HTTP server with middleware
 func (c *Coordinator) StartHTTPServer() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
+
+	// Initialize middleware
+	rateLimiter := NewRateLimitMiddleware(10.0, 20) // 10 requests/sec, burst of 20
+	rateLimiter.StartCleanup()
+
+	// Apply middleware
+	r.Use(gin.CustomRecovery(func(c *gin.Context, recovered interface{}) {
+		if err, ok := recovered.(string); ok {
+			WriteJSONError(c.Writer, "internal server error", 500, err)
+		} else {
+			WriteJSONError(c.Writer, "internal server error", 500, "an unexpected error occurred")
+		}
+		c.Abort()
+	}))
+
+	// Add custom middleware for rate limiting and logging
+	r.Use(func(c *gin.Context) {
+		// Rate limiting
+		rateLimiter.RateLimit(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			c.Next()
+		})).ServeHTTP(c.Writer, c.Request)
+	})
 
 	// Register routes
 	r.GET("/health", c.handleHealth)
 	r.POST("/request", c.handleRequest)
 
-	log.Printf("🌐 Coordinator server starting on port %d", c.port)
+	log.Printf("🌐 Coordinator server starting on port %d with rate limiting (10 req/sec)", c.port)
 	if err := r.Run(fmt.Sprintf(":%d", c.port)); err != nil {
 		log.Fatalf("Failed to start coordinator server: %v", err)
 	}
@@ -204,7 +226,7 @@ func (c *Coordinator) StartHTTPServer() {
 func (c *Coordinator) handleRequest(ctx *gin.Context) {
 	var req models.OracleRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		WriteJSONError(ctx.Writer, "invalid request", 400, err.Error())
 		return
 	}
 
@@ -218,6 +240,13 @@ func (c *Coordinator) handleRequest(ctx *gin.Context) {
 	defer cancel()
 
 	result := c.SubmitRequest(requestCtx, req)
+
+	// Check if we got any results
+	if len(result.WorkerResponses) == 0 {
+		WriteJSONError(ctx.Writer, "no workers available", 503, "no workers responded to the request")
+		return
+	}
+
 	ctx.JSON(http.StatusOK, result)
 }
 

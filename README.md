@@ -1,5 +1,7 @@
 # Distributed Worker System - Simulating Oracle Requests
 
+[![CI](https://github.com/114windd/distributed-worker-system/actions/workflows/ci.yml/badge.svg)](https://github.com/114windd/distributed-worker-system/actions/workflows/ci.yml)
+
 A distributed worker system in Go that simulates oracle requests using NATS message queue for scalable pub/sub communication. The system consists of a Coordinator that publishes oracle tasks to NATS and Workers that subscribe to process them, with HTTP API maintained for client compatibility.
 
 ## Features
@@ -12,6 +14,10 @@ A distributed worker system in Go that simulates oracle requests using NATS mess
 - **Metadata Collection**: Worker response times and performance tracking
 - **Fault Tolerance**: Graceful handling when workers fail or disconnect
 - **Horizontal Scaling**: Easy to add/remove workers without configuration changes
+- **Rate Limiting**: Built-in rate limiting (10 req/sec) to prevent API abuse
+- **Structured Errors**: Consistent JSON error responses with detailed information
+- **Docker Support**: Complete containerization with docker-compose orchestration
+- **CI/CD Pipeline**: Automated testing, linting, and building with GitHub Actions
 
 ## Architecture
 
@@ -73,6 +79,44 @@ go run cmd/worker/main.go -port=8083
 
 ```bash
 go run cmd/demo/main.go
+```
+
+## Docker Setup (Recommended)
+
+### Quick Start with Docker Compose
+
+```bash
+# Clone the repository
+git clone https://github.com/114windd/distributed-worker-system.git
+cd distributed-worker-system
+
+# Start all services with Docker Compose
+docker-compose -f docker/docker-compose.yml up --build
+
+# Run demo client
+docker-compose -f docker/docker-compose.yml run --rm demo
+```
+
+### Individual Docker Services
+
+```bash
+# Build images
+docker build -f docker/Dockerfile.coordinator -t distributed-worker-coordinator .
+docker build -f docker/Dockerfile.worker -t distributed-worker-worker .
+docker build -f docker/Dockerfile.demo -t distributed-worker-demo .
+
+# Start NATS server
+docker run -d --name nats -p 4222:4222 -p 8222:8222 nats:2.11-alpine --port 4222 --http_port 8222 --jetstream
+
+# Start coordinator
+docker run -d --name coordinator --link nats -p 8080:8080 distributed-worker-coordinator
+
+# Start workers
+docker run -d --name worker1 --link nats distributed-worker-worker ./worker -port=8081
+docker run -d --name worker2 --link nats distributed-worker-worker ./worker -port=8082
+
+# Run demo
+docker run --rm --link coordinator distributed-worker-demo
 ```
 
 ## Manual Testing
@@ -196,6 +240,21 @@ go build -o bin/demo cmd/demo/main.go
 go test ./...
 ```
 
+## Phase 2 Features
+
+### Security & Infrastructure
+- **Rate Limiting**: Token bucket algorithm limiting requests to 10 req/sec per IP
+- **Structured Errors**: Consistent JSON error responses with error codes and details
+- **Docker Containerization**: Multi-stage builds for minimal, secure images
+- **Health Checks**: Built-in health monitoring for all services
+
+### CI/CD Pipeline
+- **Automated Testing**: Unit tests, integration tests, and race condition detection
+- **Code Quality**: Automated linting with golangci-lint and gofmt
+- **Security Scanning**: Gosec security scanner for vulnerability detection
+- **Docker Builds**: Automated Docker image building and caching
+- **Build Artifacts**: Automatic binary generation and artifact upload
+
 ## Benefits of NATS Integration
 
 - **Improved Scalability**: Easy horizontal scaling of workers
@@ -218,6 +277,29 @@ If you see "nats: no servers available for connection":
 1. Ensure NATS server is running
 2. Check worker logs for connection errors
 3. Verify worker is subscribed to `oracle.tasks` subject
+
+### Rate Limiting Issues
+
+If you see "rate limit exceeded" errors:
+1. Check your request frequency (limit: 10 req/sec per IP)
+2. Implement client-side backoff and retry logic
+3. Consider using multiple IP addresses for high-volume testing
+
+### Docker Issues
+
+If Docker containers fail to start:
+1. Check Docker daemon is running: `docker info`
+2. Verify port availability: `netstat -tulpn | grep :8080`
+3. Check container logs: `docker logs <container-name>`
+4. Ensure sufficient resources: `docker system df`
+
+### CI/CD Pipeline Issues
+
+If GitHub Actions fail:
+1. Check the Actions tab in your repository
+2. Review the specific job logs for error details
+3. Ensure all dependencies are properly declared in go.mod
+4. Verify Docker builds work locally before pushing
 
 ## License
 
