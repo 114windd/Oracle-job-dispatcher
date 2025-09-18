@@ -6,50 +6,36 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"distributed-worker-system/pkg/worker"
+
+	"github.com/nats-io/nats.go"
 )
 
 func main() {
 	// Parse command line flags
-	var port = flag.Int("port", 8081, "Port for the worker server")
-	var coordinatorURL = flag.String("coordinator", "http://localhost:8080", "Coordinator URL")
-	var register = flag.Bool("register", true, "Whether to register with coordinator")
+	var port = flag.Int("port", 8081, "Port for the worker (used for identification)")
 	flag.Parse()
+
+	// Connect to NATS
+	nc, err := nats.Connect(nats.DefaultURL)
+	if err != nil {
+		log.Fatalf("Failed to connect to NATS: %v", err)
+	}
+	defer nc.Close()
+
+	log.Printf("🔗 Connected to NATS at %s", nats.DefaultURL)
 
 	// Create worker instance
 	w := worker.NewWorker(*port)
 
-	// Register with coordinator if requested
-	if *register {
-		maxRetries := 3
-		registered := false
-		for i := 0; i < maxRetries; i++ {
-			if err := w.RegisterWithCoordinator(*coordinatorURL); err != nil {
-				log.Printf("⚠️  Registration attempt %d failed: %v", i+1, err)
-				if i < maxRetries-1 {
-					time.Sleep(1 * time.Second)
-				}
-			} else {
-				registered = true
-				break
-			}
-		}
-		if !registered {
-			log.Printf("⚠️  Failed to register with coordinator after %d attempts. Worker will run independently.", maxRetries)
-		}
-	}
-
 	log.Printf("🔧 Worker %s started successfully!", w.GetID())
-	log.Printf("📡 Worker API available at: http://localhost:%d", *port)
-	log.Printf("📋 Process tasks at: POST http://localhost:%d/task", *port)
-	log.Printf("❤️  Health check at: GET http://localhost:%d/health", *port)
+	log.Printf("👂 Subscribing to oracle.tasks...")
 
-	// Start worker server in a goroutine
-	go func() {
-		w.StartWorkerServer()
-	}()
+	// Subscribe to tasks and process them
+	if err := w.SubscribeTasks(nc); err != nil {
+		log.Fatalf("Failed to subscribe to tasks: %v", err)
+	}
 
 	// Wait for interrupt signal
 	c := make(chan os.Signal, 1)
@@ -57,4 +43,5 @@ func main() {
 	<-c
 
 	log.Printf("🛑 Shutting down worker %s...", w.GetID())
+	w.Close()
 }

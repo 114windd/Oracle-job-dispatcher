@@ -15,7 +15,6 @@ type WorkerResult struct {
 	Value        float64       `json:"value"`
 	Err          string        `json:"err,omitempty"`
 	ResponseTime time.Duration `json:"response_time"`
-	Reliable     bool          `json:"reliable"`
 }
 
 // OracleResult represents the final aggregated response

@@ -1,31 +1,30 @@
 # Distributed Worker System - Simulating Oracle Requests
 
-A distributed worker system in Go that simulates oracle requests using HTTP-based communication. The system consists of a Coordinator that manages oracle requests and dynamically registered Workers that process tasks and return results.
+A distributed worker system in Go that simulates oracle requests using NATS message queue for scalable pub/sub communication. The system consists of a Coordinator that publishes oracle tasks to NATS and Workers that subscribe to process them, with HTTP API maintained for client compatibility.
 
 ## Features
 
-- **HTTP Communication**: REST API between Coordinator and Workers
-- **Dynamic Worker Registration**: Workers register themselves at runtime
+- **NATS Pub/Sub Communication**: Scalable message queue between Coordinator and Workers
+- **HTTP Client API**: REST API for client requests (unchanged interface)
 - **Oracle Simulation**: Random delays, failures, and value discrepancies
 - **Context-based Timeouts**: Robust handling of worker failures and delays
 - **Multiple Aggregation Strategies**: Average, median, and majority vote
-- **Metadata Collection**: Worker reliability, response times, and performance tracking
-- **Fault Tolerance**: Graceful handling when workers fail or deregister
+- **Metadata Collection**: Worker response times and performance tracking
+- **Fault Tolerance**: Graceful handling when workers fail or disconnect
+- **Horizontal Scaling**: Easy to add/remove workers without configuration changes
 
 ## Architecture
 
 ```
-Worker A ---> POST /register ---> Coordinator
-Worker B ---> POST /register ---> Coordinator  
-Worker C ---> POST /register ---> Coordinator
-
-Client ---> POST /request ---> Coordinator
-Coordinator ---> POST /task ---> Worker A
-Coordinator ---> POST /task ---> Worker B
-Coordinator ---> POST /task ---> Worker C
-Workers ---> POST /result (sync response) ---> Coordinator
-Coordinator ---> Aggregate Results ---> Client
+Client ---> POST /request (HTTP) ---> Coordinator
+Coordinator ---> Publish (oracle.tasks) ---> NATS
+Workers ---> Subscribe (oracle.tasks) ---> Process ---> Publish (oracle.results) ---> NATS
+Coordinator ---> Subscribe (oracle.results) ---> Aggregate ---> Return to Client (HTTP)
 ```
+
+### NATS Subjects
+- **`oracle.tasks`**: Coordinator publishes tasks, Workers subscribe
+- **`oracle.results`**: Workers publish results, Coordinator subscribes
 
 ## Quick Start
 
@@ -35,15 +34,27 @@ Coordinator ---> Aggregate Results ---> Client
 go mod tidy
 ```
 
-### 2. Start the Coordinator
+### 2. Install NATS Server
+
+```bash
+go install github.com/nats-io/nats-server/v2@latest
+```
+
+### 3. Start NATS Server
+
+```bash
+nats-server --port 4222 --http_port 8222 --jetstream
+```
+
+### 4. Start the Coordinator
 
 ```bash
 go run cmd/coordinator/main.go
 ```
 
-The coordinator will start on port 8080.
+The coordinator will start on port 8080 and connect to NATS.
 
-### 3. Start Workers
+### 5. Start Workers
 
 In separate terminals, start multiple workers:
 
@@ -58,21 +69,13 @@ go run cmd/worker/main.go -port=8082
 go run cmd/worker/main.go -port=8083
 ```
 
-### 4. Run the Demo
+### 6. Run the Demo
 
 ```bash
 go run cmd/demo/main.go
 ```
 
 ## Manual Testing
-
-### Register a Worker
-
-```bash
-curl -X POST http://localhost:8080/register \
-  -H 'Content-Type: application/json' \
-  -d '{"id":"worker-1","endpoint":"http://localhost:8081"}'
-```
 
 ### Submit an Oracle Request
 
@@ -82,23 +85,29 @@ curl -X POST http://localhost:8080/request \
   -d '{"query":"BTC/USD"}'
 ```
 
-### Check Worker Health
+### Check Coordinator Health
 
 ```bash
-curl http://localhost:8081/health
+curl http://localhost:8080/health
+```
+
+### Check NATS Server Status
+
+```bash
+curl http://localhost:8222/varz
 ```
 
 ## API Endpoints
 
 ### Coordinator API
 
-- `POST /register` - Register a worker
 - `POST /request` - Submit an oracle request
-
-### Worker API
-
-- `POST /task` - Process a task
 - `GET /health` - Health check
+
+### NATS Subjects
+
+- `oracle.tasks` - Coordinator publishes tasks, Workers subscribe
+- `oracle.results` - Workers publish results, Coordinator subscribes
 
 ## Project Structure
 
@@ -128,14 +137,18 @@ distributed-worker-system/
 
 ### Worker Flags
 
-- `-port`: Port for the worker server (default: 8081)
-- `-coordinator`: Coordinator URL (default: http://localhost:8080)
-- `-register`: Whether to register with coordinator (default: true)
+- `-port`: Port for worker identification (default: 8081)
+
+### NATS Configuration
+
+- **Default URL**: `nats://localhost:4222`
+- **HTTP Monitoring**: `http://localhost:8222`
+- **JetStream**: Enabled for message persistence
 
 ### Example
 
 ```bash
-go run cmd/worker/main.go -port=8081 -coordinator=http://localhost:8080 -register=true
+go run cmd/worker/main.go -port=8081
 ```
 
 ## Oracle Simulation
@@ -159,6 +172,8 @@ The system simulates real oracle behavior:
 - Partial results are returned with reliability warnings
 - Context-based timeouts prevent hanging requests
 - Graceful degradation when most workers fail
+- NATS provides message persistence and retry mechanisms
+- Automatic reconnection to NATS server
 
 ## Development
 
@@ -181,6 +196,29 @@ go build -o bin/demo cmd/demo/main.go
 go test ./...
 ```
 
+## Benefits of NATS Integration
+
+- **Improved Scalability**: Easy horizontal scaling of workers
+- **Better Decoupling**: Workers don't need to know coordinator endpoints
+- **Enhanced Fault Tolerance**: NATS provides message persistence and retry
+- **Simplified Architecture**: Clean pub/sub pattern replaces complex HTTP routing
+- **Production Ready**: NATS is battle-tested in production environments
+
+## Troubleshooting
+
+### NATS Connection Issues
+
+If you see "nats: no servers available for connection":
+1. Ensure NATS server is running: `nats-server --port 4222 --http_port 8222 --jetstream`
+2. Check NATS server status: `curl http://localhost:8222/varz`
+3. Verify coordinator can connect: Check coordinator logs
+
+### Worker Not Processing Tasks
+
+1. Ensure NATS server is running
+2. Check worker logs for connection errors
+3. Verify worker is subscribed to `oracle.tasks` subject
+
 ## License
 
-This project is part of a learning exercise for distributed systems in Go.
+This project is part of a learning exercise for distributed systems in Go with NATS message queue integration.

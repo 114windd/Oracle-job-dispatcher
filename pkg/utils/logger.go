@@ -15,8 +15,8 @@ func LogWorkerResult(res models.WorkerResult) {
 	if res.Err != "" {
 		log.Printf("❌ Worker %s failed: %s (took %v)", res.WorkerID, res.Err, res.ResponseTime)
 	} else {
-		log.Printf("✅ Worker %s: value=%.2f, time=%v, reliable=%t",
-			res.WorkerID, res.Value, res.ResponseTime, res.Reliable)
+		log.Printf("✅ Worker %s: value=%.2f, time=%v",
+			res.WorkerID, res.Value, res.ResponseTime)
 	}
 }
 

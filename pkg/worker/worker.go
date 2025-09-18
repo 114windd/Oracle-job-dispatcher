@@ -1,24 +1,24 @@
 package worker
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math/rand"
-	"net/http"
 	"time"
 
 	"distributed-worker-system/pkg/models"
 	"distributed-worker-system/pkg/utils"
 
-	"github.com/gin-gonic/gin"
+	"github.com/nats-io/nats.go"
 )
 
-// Worker represents a worker that processes oracle tasks
+// Worker represents a worker that processes oracle tasks via NATS
 type Worker struct {
 	ID   string
 	Port int
+	nc   *nats.Conn
 }
 
 // NewWorker creates a new worker instance
@@ -29,43 +29,52 @@ func NewWorker(port int) *Worker {
 	}
 }
 
-// StartWorkerServer starts the worker HTTP server
-func (w *Worker) StartWorkerServer() {
-	gin.SetMode(gin.ReleaseMode)
-	r := gin.Default()
+// SubscribeTasks listens for new tasks and processes them
+func (w *Worker) SubscribeTasks(nc *nats.Conn) error {
+	w.nc = nc
 
-	// Register routes
-	r.POST("/task", w.handleTask)
-	r.GET("/health", w.handleHealth)
+	// Subscribe to oracle.tasks subject
+	sub, err := nc.Subscribe("oracle.tasks", func(msg *nats.Msg) {
+		var req models.OracleRequest
+		if err := json.Unmarshal(msg.Data, &req); err != nil {
+			log.Printf("❌ Worker %s failed to unmarshal task: %v", w.ID, err)
+			return
+		}
 
-	log.Printf("🔧 Worker %s starting on port %d", w.ID, w.Port)
-	if err := r.Run(fmt.Sprintf(":%d", w.Port)); err != nil {
-		log.Fatalf("Failed to start worker server: %v", err)
-	}
-}
+		log.Printf("📋 Worker %s processing task %s: %s", w.ID, req.ID, req.Query)
 
-// handleTask handles task processing requests
-func (w *Worker) handleTask(ctx *gin.Context) {
-	var req models.OracleRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
+		// Process the task
+		result := w.processTask(req)
 
-	log.Printf("📋 Worker %s processing task %s: %s", w.ID, req.ID, req.Query)
-
-	// Process the task
-	result := w.processTask(req)
-
-	ctx.JSON(http.StatusOK, result)
-}
-
-// handleHealth handles health check requests
-func (w *Worker) handleHealth(ctx *gin.Context) {
-	ctx.JSON(http.StatusOK, gin.H{
-		"status":    "healthy",
-		"worker_id": w.ID,
+		// Publish result back to oracle.results
+		if err := w.publishResult(result); err != nil {
+			log.Printf("❌ Worker %s failed to publish result: %v", w.ID, err)
+		}
 	})
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to oracle.tasks: %v", err)
+	}
+
+	log.Printf("👂 Worker %s subscribed to oracle.tasks", w.ID)
+
+	// Keep subscription alive
+	<-context.Background().Done()
+	return sub.Unsubscribe()
+}
+
+// publishResult publishes worker result to oracle.results subject
+func (w *Worker) publishResult(result models.WorkerResult) error {
+	resultBytes, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("failed to marshal result: %v", err)
+	}
+
+	if err := w.nc.Publish("oracle.results", resultBytes); err != nil {
+		return fmt.Errorf("failed to publish result: %v", err)
+	}
+
+	log.Printf("📤 Worker %s published result for request %s", w.ID, result.RequestID)
+	return nil
 }
 
 // processTask simulates fetching oracle data with latency/failure
@@ -84,7 +93,6 @@ func (w *Worker) processTask(req models.OracleRequest) models.WorkerResult {
 			Value:        0,
 			Err:          "simulated worker failure",
 			ResponseTime: time.Since(startTime),
-			Reliable:     true,
 		}
 	}
 
@@ -97,7 +105,6 @@ func (w *Worker) processTask(req models.OracleRequest) models.WorkerResult {
 		Value:        value,
 		Err:          "",
 		ResponseTime: time.Since(startTime),
-		Reliable:     true,
 	}
 }
 
@@ -123,44 +130,15 @@ func (w *Worker) simulateResponse(query string) float64 {
 	return baseValue + variance
 }
 
-// RegisterWithCoordinator registers this worker with the coordinator using Gin-style approach
-func (w *Worker) RegisterWithCoordinator(coordinatorURL string) error {
-	registerReq := models.RegisterRequest{
-		ID:       w.ID,
-		Endpoint: fmt.Sprintf("http://localhost:%d", w.Port),
-	}
-
-	// Marshal request using Gin's JSON utilities
-	reqBody, err := json.Marshal(registerReq)
-	if err != nil {
-		return fmt.Errorf("failed to marshal registration request: %v", err)
-	}
-
-	// Create HTTP request
-	req, err := http.NewRequest("POST", coordinatorURL+"/register", bytes.NewBuffer(reqBody))
-	if err != nil {
-		return fmt.Errorf("failed to create registration request: %v", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-
-	// Make request
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to register with coordinator: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("coordinator returned status %d", resp.StatusCode)
-	}
-
-	log.Printf("✅ Worker %s registered with coordinator at %s", w.ID, coordinatorURL)
-	return nil
-}
-
 // GetID returns the worker's ID
 func (w *Worker) GetID() string {
 	return w.ID
+}
+
+// Close cleans up NATS connection
+func (w *Worker) Close() error {
+	if w.nc != nil {
+		w.nc.Close()
+	}
+	return nil
 }

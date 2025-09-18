@@ -76,8 +76,8 @@ func SimulateClient(coordinatorURL string, queries []string) {
 				fmt.Printf("  ❌ %s: %s (took %v)\n",
 					workerResult.WorkerID, workerResult.Err, workerResult.ResponseTime)
 			} else {
-				fmt.Printf("  ✅ %s: $%.2f (took %v, reliable: %t)\n",
-					workerResult.WorkerID, workerResult.Value, workerResult.ResponseTime, workerResult.Reliable)
+				fmt.Printf("  ✅ %s: $%.2f (took %v)\n",
+					workerResult.WorkerID, workerResult.Value, workerResult.ResponseTime)
 			}
 		}
 
