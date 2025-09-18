@@ -1,0 +1,47 @@
+# Multi-stage build for Worker
+FROM golang:1.24-alpine AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Install git and ca-certificates
+RUN apk add --no-cache git ca-certificates
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the worker binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o worker cmd/worker/main.go
+
+# Final stage - minimal image
+FROM alpine:latest
+
+# Install ca-certificates for HTTPS requests
+RUN apk --no-cache add ca-certificates
+
+# Create non-root user
+RUN adduser -D -s /bin/sh worker
+
+# Set working directory
+WORKDIR /app
+
+# Copy binary from builder stage
+COPY --from=builder /app/worker .
+
+# Change ownership to non-root user
+RUN chown worker:worker /app/worker
+
+# Switch to non-root user
+USER worker
+
+# Expose port (for identification purposes)
+EXPOSE 8081
+
+# Run the worker
+CMD ["./worker", "-port=8081"]

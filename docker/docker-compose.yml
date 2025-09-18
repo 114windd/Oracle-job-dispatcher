@@ -1,0 +1,106 @@
+# Docker Compose file for Distributed Worker System
+
+services:
+  # NATS Server
+  nats:
+    image: nats:2.11-alpine
+    container_name: distributed-worker-nats
+    ports:
+      - "4222:4222" # NATS client port
+      - "8222:8222" # HTTP monitoring port
+    command: [ "--port", "4222", "--http_port", "8222", "--jetstream" ]
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8222/varz" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - worker-network
+
+  # Coordinator
+  coordinator:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.coordinator
+    container_name: distributed-worker-coordinator
+    ports:
+      - "8080:8080"
+    environment:
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - worker-network
+
+  # Worker 1
+  worker-1:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    container_name: distributed-worker-1
+    environment:
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      nats:
+        condition: service_healthy
+    command: [ "./worker", "-port=8081" ]
+    networks:
+      - worker-network
+
+  # Worker 2
+  worker-2:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    container_name: distributed-worker-2
+    environment:
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      nats:
+        condition: service_healthy
+    command: [ "./worker", "-port=8082" ]
+    networks:
+      - worker-network
+
+  # Worker 3
+  worker-3:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    container_name: distributed-worker-3
+    environment:
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      nats:
+        condition: service_healthy
+    command: [ "./worker", "-port=8083" ]
+    networks:
+      - worker-network
+
+  # Demo Client (optional - for testing)
+  demo:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.demo
+    container_name: distributed-worker-demo
+    depends_on:
+      coordinator:
+        condition: service_healthy
+    command: [ "./demo" ]
+    networks:
+      - worker-network
+
+networks:
+  worker-network:
+    driver: bridge
+
+# Optional: Add volumes for data persistence
+volumes:
+  nats-data:
+    driver: local

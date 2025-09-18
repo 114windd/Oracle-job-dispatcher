@@ -34,6 +34,11 @@ Coordinator ---> Subscribe (oracle.results) ---> Aggregate ---> Return to Client
 
 ## Quick Start
 
+### Prerequisites
+
+- Go 1.23+ installed
+- Docker (optional, for containerized setup)
+
 ### 1. Install Dependencies
 
 ```bash
@@ -44,17 +49,28 @@ go mod tidy
 
 ```bash
 go install github.com/nats-io/nats-server/v2@latest
+
+# Add to PATH if needed
+export PATH=$PATH:$(go env GOPATH)/bin
+
+# Verify installation
+nats-server --version
 ```
 
 ### 3. Start NATS Server
 
 ```bash
+# Start NATS server in background
+nats-server --port 4222 --http_port 8222 --jetstream &
+
+# Or start in foreground (Ctrl+C to stop)
 nats-server --port 4222 --http_port 8222 --jetstream
 ```
 
 ### 4. Start the Coordinator
 
 ```bash
+# In a new terminal
 go run cmd/coordinator/main.go
 ```
 
@@ -65,20 +81,65 @@ The coordinator will start on port 8080 and connect to NATS.
 In separate terminals, start multiple workers:
 
 ```bash
-# Worker 1
+# Terminal 2: Worker 1
 go run cmd/worker/main.go -port=8081
 
-# Worker 2  
+# Terminal 3: Worker 2  
 go run cmd/worker/main.go -port=8082
 
-# Worker 3
+# Terminal 4: Worker 3
 go run cmd/worker/main.go -port=8083
 ```
 
 ### 6. Run the Demo
 
 ```bash
+# In a new terminal
 go run cmd/demo/main.go
+```
+
+## Alternative: Quick Test Script
+
+Create a test script to start everything automatically:
+
+```bash
+# Create test script
+cat > test_system.sh << 'EOF'
+#!/bin/bash
+echo "🚀 Starting Distributed Worker System Test"
+
+# Start NATS server
+echo "📡 Starting NATS server..."
+nats-server --port 4222 --http_port 8222 --jetstream &
+NATS_PID=$!
+sleep 3
+
+# Start coordinator
+echo "🎯 Starting coordinator..."
+go run cmd/coordinator/main.go &
+COORD_PID=$!
+sleep 3
+
+# Start workers
+echo "🔧 Starting workers..."
+go run cmd/worker/main.go -port=8081 &
+WORKER1_PID=$!
+go run cmd/worker/main.go -port=8082 &
+WORKER2_PID=$!
+sleep 3
+
+# Run demo
+echo "🧪 Running demo..."
+go run cmd/demo/main.go
+
+# Cleanup
+echo "🛑 Cleaning up..."
+kill $COORD_PID $WORKER1_PID $WORKER2_PID $NATS_PID 2>/dev/null
+EOF
+
+# Make executable and run
+chmod +x test_system.sh
+./test_system.sh
 ```
 
 ## Docker Setup (Recommended)
@@ -268,9 +329,29 @@ go test ./...
 ### NATS Connection Issues
 
 If you see "nats: no servers available for connection":
-1. Ensure NATS server is running: `nats-server --port 4222 --http_port 8222 --jetstream`
-2. Check NATS server status: `curl http://localhost:8222/varz`
-3. Verify coordinator can connect: Check coordinator logs
+
+1. **Install NATS server**:
+   ```bash
+   go install github.com/nats-io/nats-server/v2@latest
+   export PATH=$PATH:$(go env GOPATH)/bin
+   ```
+
+2. **Start NATS server**:
+   ```bash
+   nats-server --port 4222 --http_port 8222 --jetstream
+   ```
+
+3. **Verify NATS is running**:
+   ```bash
+   curl http://localhost:8222/varz
+   ```
+
+4. **Check coordinator logs** for connection details
+
+5. **Alternative: Use Docker**:
+   ```bash
+   docker run -d --name nats -p 4222:4222 -p 8222:8222 nats:2.11-alpine --port 4222 --http_port 8222 --jetstream
+   ```
 
 ### Worker Not Processing Tasks
 
@@ -288,10 +369,81 @@ If you see "rate limit exceeded" errors:
 ### Docker Issues
 
 If Docker containers fail to start:
-1. Check Docker daemon is running: `docker info`
-2. Verify port availability: `netstat -tulpn | grep :8080`
-3. Check container logs: `docker logs <container-name>`
-4. Ensure sufficient resources: `docker system df`
+
+1. **Fix Docker permissions**:
+   ```bash
+   # Add user to docker group
+   sudo usermod -aG docker $USER
+   newgrp docker
+   
+   # Or use sudo
+   sudo docker-compose -f docker/docker-compose.yml up --build
+   ```
+
+2. **Check Docker daemon**:
+   ```bash
+   docker info
+   sudo systemctl status docker
+   ```
+
+3. **Verify port availability**:
+   ```bash
+   netstat -tulpn | grep :8080
+   ```
+
+4. **Check container logs**:
+   ```bash
+   docker logs <container-name>
+   ```
+
+5. **Clean up Docker**:
+   ```bash
+   docker system prune -a
+   docker-compose -f docker/docker-compose.yml down
+   ```
+
+### Common Issues
+
+#### "nats-server: command not found"
+
+This means NATS server is not in your PATH:
+
+```bash
+# Install NATS server
+go install github.com/nats-io/nats-server/v2@latest
+
+# Add Go bin to PATH
+echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> ~/.bashrc
+source ~/.bashrc
+
+# Or run directly
+$(go env GOPATH)/bin/nats-server --port 4222 --http_port 8222 --jetstream
+```
+
+#### "Failed to connect to NATS: no servers available"
+
+This means NATS server is not running:
+
+```bash
+# Check if NATS is running
+curl http://localhost:8222/varz
+
+# If not running, start it
+nats-server --port 4222 --http_port 8222 --jetstream
+```
+
+#### "permission denied while trying to connect to the Docker daemon"
+
+Fix Docker permissions:
+
+```bash
+# Add user to docker group
+sudo usermod -aG docker $USER
+newgrp docker
+
+# Or use sudo
+sudo docker-compose -f docker/docker-compose.yml up --build
+```
 
 ### CI/CD Pipeline Issues
 
